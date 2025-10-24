@@ -1,11 +1,20 @@
 # ---------- Stage 1: Build n8n ----------
-FROM node:18-bullseye AS builder
+FROM node:20-bullseye AS builder
+
+# Required tools for native modules
 RUN apt-get update && apt-get install -y python3 make g++ git && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /data
+
+# Enable Corepack (manages pnpm automatically)
+RUN corepack enable
+
+# Clone latest n8n
 RUN git clone https://github.com/n8n-io/n8n.git .
-RUN npm install -g pnpm
+
+# Install deps & build
 RUN pnpm install --frozen-lockfile
-RUN pnpm run build
+RUN pnpm build
 
 # ---------- Stage 2: Runtime image ----------
 FROM node:18-bullseye
