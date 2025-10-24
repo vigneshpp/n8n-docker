@@ -1,31 +1,52 @@
-# ---------- Stage 1: Build n8n ----------
-FROM node:20-bullseye AS builder
+# ------------------------------------------------------------
+# Stage 1 — Build n8n from source (lightweight + ARMv7 compatible)
+# ------------------------------------------------------------
+FROM node:20-bookworm-slim AS builder
 
-# Required tools for native modules
-RUN apt-get update && apt-get install -y python3 make g++ git && rm -rf /var/lib/apt/lists/*
+# Install minimal build dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      git python3 make g++ ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
-WORKDIR /data
-
-# Enable Corepack (manages pnpm automatically)
+# Enable Corepack (manages pnpm/yarn automatically)
 RUN corepack enable
 
-# Clone latest n8n
+# Set working directory
+WORKDIR /data
+
+# Clone the latest n8n source
 RUN git clone https://github.com/n8n-io/n8n.git .
 
-# Install deps & build
+# Install dependencies using pnpm (use lockfile for reproducibility)
 RUN pnpm install --frozen-lockfile
+
+# Build n8n (transpile TypeScript → JavaScript)
 RUN pnpm build
 
-# ---------- Stage 2: Runtime image ----------
-FROM node:18-bullseye
-ENV NODE_ENV=production N8N_PORT=5678 N8N_HOST=0.0.0.0 N8N_BASIC_AUTH_ACTIVE=false
-WORKDIR /home/node
-RUN npm install -g pnpm && mkdir -p /home/node/.n8n && chown -R node:node /home/node
-COPY --from=builder /data /data
-WORKDIR /data
-USER node
+# ------------------------------------------------------------
+# Stage 2 — Runtime image
+# ------------------------------------------------------------
+FROM node:20-bookworm-slim
+
+# Create non-root user
+RUN addgroup --system n8n && adduser --system --ingroup n8n n8n
+
+WORKDIR /home/n8n
+
+# Copy built application from builder
+COPY --from=builder /data /home/n8n/n8n
+
+# Set environment variables
+ENV NODE_ENV=production
+ENV N8N_PORT=5678
+ENV N8N_PATH=/home/n8n/n8n
+
+# Expose port
 EXPOSE 5678
-VOLUME ["/home/node/.n8n"]
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:5678/healthz || exit 1
-CMD ["pnpm", "start"]
+
+# Switch to non-root user
+USER n8n
+
+# Default command
+CMD ["node", "/home/n8n/n8n/packages/cli/bin/n8n"]
